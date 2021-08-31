@@ -27,7 +27,7 @@ use tracing::{debug, error, info, trace};
 use casper_execution_engine::{
     core::engine_state::{
         self, genesis::GenesisSuccess, EngineConfig, EngineState, GetEraValidatorsError,
-        GetEraValidatorsRequest,
+        GetEraValidatorsRequest, UpgradeConfig, UpgradeSuccess,
     },
     shared::{
         newtypes::{Blake2bHash, CorrelationId},
@@ -101,7 +101,7 @@ impl From<&BlockHeader> for ExecutionPreState {
     }
 }
 
-type ExecQueue = Arc<Mutex<BTreeMap<u64, (FinalizedBlock, Vec<Deploy>)>>>;
+type ExecQueue = Arc<Mutex<BTreeMap<u64, (FinalizedBlock, Vec<Deploy>, Vec<Deploy>)>>>;
 
 /// The contract runtime components.
 #[derive(DataSize)]
@@ -264,22 +264,9 @@ where
             ContractRuntimeRequest::Upgrade {
                 upgrade_config,
                 responder,
-            } => {
-                debug!(?upgrade_config, "upgrade");
-                let engine_state = Arc::clone(&self.engine_state);
-                let metrics = Arc::clone(&self.metrics);
-                async move {
-                    let correlation_id = CorrelationId::new();
-                    let start = Instant::now();
-                    let result = engine_state.commit_upgrade(correlation_id, *upgrade_config);
-                    metrics
-                        .commit_upgrade
-                        .observe(start.elapsed().as_secs_f64());
-                    debug!(?result, "upgrade result");
-                    responder.respond(result).await
-                }
-                .ignore()
-            }
+            } => responder
+                .respond(self.commit_upgrade(*upgrade_config))
+                .ignore(),
             ContractRuntimeRequest::Query {
                 query_request,
                 responder,
@@ -415,6 +402,7 @@ where
                 execution_pre_state,
                 finalized_block,
                 deploys,
+                transfers,
                 responder,
             } => {
                 trace!(
@@ -434,6 +422,7 @@ where
                         execution_pre_state,
                         finalized_block,
                         deploys,
+                        transfers,
                     );
                     trace!(?result, "execute block response");
                     responder.respond(result).await
@@ -443,6 +432,7 @@ where
             ContractRuntimeRequest::EnqueueBlockForExecution {
                 finalized_block,
                 deploys,
+                transfers,
             } => {
                 info!(?finalized_block, "enqueuing finalized block for execution");
                 let mut effects = Effects::new();
@@ -464,14 +454,15 @@ where
                             protocol_version,
                             finalized_block,
                             deploys,
+                            transfers,
                         )
                         .ignore(),
                     )
                 } else {
-                    exec_queue
-                        .lock()
-                        .unwrap()
-                        .insert(finalized_block.height(), (finalized_block, deploys));
+                    exec_queue.lock().unwrap().insert(
+                        finalized_block.height(),
+                        (finalized_block, deploys, transfers),
+                    );
                 }
                 effects
             }
@@ -565,16 +556,30 @@ impl ContractRuntime {
         )
     }
 
-    /// Retrieve trie keys for the integrity check.
-    pub(crate) fn trie_store_check(&self, trie_keys: Vec<Blake2bHash>) -> Vec<Blake2bHash> {
-        let correlation_id = CorrelationId::new();
-        match self
+    fn commit_upgrade(
+        &self,
+        upgrade_config: UpgradeConfig,
+    ) -> Result<UpgradeSuccess, engine_state::Error> {
+        debug!(?upgrade_config, "upgrade");
+        let start = Instant::now();
+        let result = self
             .engine_state
+            .commit_upgrade(CorrelationId::new(), upgrade_config);
+        self.metrics
+            .commit_upgrade
+            .observe(start.elapsed().as_secs_f64());
+        debug!(?result, "upgrade result");
+        result
+    }
+
+    /// Retrieve trie keys for the integrity check.
+    pub(crate) fn trie_store_check(
+        &self,
+        trie_keys: Vec<Blake2bHash>,
+    ) -> Result<Vec<Blake2bHash>, engine_state::Error> {
+        let correlation_id = CorrelationId::new();
+        self.engine_state
             .missing_trie_keys(correlation_id, trie_keys)
-        {
-            Ok(keys) => keys,
-            Err(error) => panic!("Error in retrieving keys for DB check: {:?}", error),
-        }
     }
 
     pub(crate) fn set_initial_state(&mut self, sequential_block_state: ExecutionPreState) {
@@ -591,6 +596,7 @@ impl ContractRuntime {
         protocol_version: ProtocolVersion,
         finalized_block: FinalizedBlock,
         deploys: Vec<Deploy>,
+        transfers: Vec<Deploy>,
     ) where
         REv: From<ContractRuntimeRequest>
             + From<ContractRuntimeAnnouncement>
@@ -610,6 +616,7 @@ impl ContractRuntime {
                 current_execution_pre_state,
                 finalized_block,
                 deploys,
+                transfers,
             )
         })
         .await
@@ -647,9 +654,9 @@ impl ContractRuntime {
             let queue = &mut *exec_queue.lock().expect("mutex poisoned");
             queue.remove(&new_execution_pre_state.next_block_height)
         };
-        if let Some((finalized_block, deploys)) = next_block {
+        if let Some((finalized_block, deploys, transfers)) = next_block {
             effect_builder
-                .enqueue_block_for_execution(finalized_block, deploys)
+                .enqueue_block_for_execution(finalized_block, deploys, transfers)
                 .await
         }
     }
