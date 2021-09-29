@@ -3,6 +3,7 @@ use std::{cell::Cell, iter, rc::Rc};
 use assert_matches::assert_matches;
 use proptest::prelude::*;
 
+use casper_hashing::Digest;
 use casper_types::{
     account::{Account, AccountHash, AssociatedKeys, Weight, ACCOUNT_HASH_LENGTH},
     contracts::NamedKeys,
@@ -20,10 +21,7 @@ use crate::{
         runtime_context::dictionary,
         ValidationError,
     },
-    shared::{
-        newtypes::{Blake2bHash, CorrelationId},
-        transform::Transform,
-    },
+    shared::newtypes::{Blake2bHash, CorrelationId},
     storage::{
         global_state::{in_memory::InMemoryGlobalState, StateProvider, StateReader},
         trie::merkle_proof::TrieMerkleProof,
@@ -91,7 +89,6 @@ fn tracking_copy_new() {
     let tc = TrackingCopy::new(db);
 
     assert!(tc.ops.is_empty());
-    assert!(tc.fns.is_empty());
 }
 
 #[test]
@@ -127,9 +124,6 @@ fn tracking_copy_read() {
     let value = tc.read(correlation_id, &k).unwrap().unwrap();
     // value read correctly
     assert_eq!(value, zero);
-    // read produces an identity transform
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::Identity));
     // read does produce an op
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Read));
@@ -146,23 +140,18 @@ fn tracking_copy_write() {
     let two = StoredValue::CLValue(CLValue::from_t(2_i32).unwrap());
 
     // writing should work
-    tc.write(k, one.clone());
+    tc.write(k, one);
     // write does not need to query the DB
     let db_value = counter.get();
     assert_eq!(db_value, 0);
-    // write creates a Transform
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::Write(one)));
     // write creates an Op
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Write));
 
     // writing again should update the values
-    tc.write(k, two.clone());
+    tc.write(k, two);
     let db_value = counter.get();
     assert_eq!(db_value, 0);
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::Write(two)));
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Write));
 }
@@ -181,9 +170,6 @@ fn tracking_copy_add_i32() {
     let add = tc.add(correlation_id, k, three.clone());
     assert_matches!(add, Ok(_));
 
-    // add creates a Transform
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::AddInt32(3)));
     // add creates an Op
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Add));
@@ -191,8 +177,6 @@ fn tracking_copy_add_i32() {
     // adding again should update the values
     let add = tc.add(correlation_id, k, three);
     assert_matches!(add, Ok(_));
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::AddInt32(6)));
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Add));
 }
@@ -231,14 +215,10 @@ fn tracking_copy_add_named_key() {
     );
     assert_matches!(failed_add, Ok(AddResult::TypeMismatch(_)));
     assert!(tc.ops.is_empty());
-    assert!(tc.fns.is_empty());
 
     // adding correct type works
     let add = tc.add(correlation_id, k, named_key);
     assert_matches!(add, Ok(_));
-    // add creates a Transform
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::AddKeys(map.clone())));
     // add creates an Op
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Add));
@@ -247,8 +227,6 @@ fn tracking_copy_add_named_key() {
     map.insert(name2, u2);
     let add = tc.add(correlation_id, k, other_named_key);
     assert_matches!(add, Ok(_));
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::AddKeys(map)));
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Add));
 }
@@ -264,9 +242,7 @@ fn tracking_copy_rw() {
     // reading then writing should update the op
     let value = StoredValue::CLValue(CLValue::from_t(3_i32).unwrap());
     let _ = tc.read(correlation_id, &k);
-    tc.write(k, value.clone());
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::Write(value)));
+    tc.write(k, value);
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Write));
 }
@@ -283,8 +259,6 @@ fn tracking_copy_ra() {
     let value = StoredValue::CLValue(CLValue::from_t(3_i32).unwrap());
     let _ = tc.read(correlation_id, &k);
     let _ = tc.add(correlation_id, k, value);
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::AddInt32(3)));
     assert_eq!(tc.ops.len(), 1);
     // this Op is correct because Read+Add = Write
     assert_eq!(tc.ops.get(&k), Some(&Op::Write));
@@ -302,9 +276,7 @@ fn tracking_copy_aw() {
     let value = StoredValue::CLValue(CLValue::from_t(3_i32).unwrap());
     let write_value = StoredValue::CLValue(CLValue::from_t(7_i32).unwrap());
     let _ = tc.add(correlation_id, k, value);
-    tc.write(k, write_value.clone());
-    assert_eq!(tc.fns.len(), 1);
-    assert_eq!(tc.fns.get(&k), Some(&Transform::Write(write_value)));
+    tc.write(k, write_value);
     assert_eq!(tc.ops.len(), 1);
     assert_eq!(tc.ops.get(&k), Some(&Op::Write));
 }
@@ -703,7 +675,7 @@ fn validate_query_proof_should_work() {
     // Bad proof hash
     assert_eq!(
         crate::core::validate_query_proof(
-            &Blake2bHash::new(&[]),
+            &Digest::hash(&[]),
             &proofs,
             &main_account_key,
             path,
