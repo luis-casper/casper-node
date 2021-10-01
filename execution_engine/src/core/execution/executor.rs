@@ -47,7 +47,6 @@ macro_rules! on_fail_charge {
                 warn!("Execution failed: {:?}", exec_err);
                 return ExecutionResult::Failure {
                     error: exec_err.into(),
-                    execution_effect: Default::default(),
                     execution_journal: Default::default(),
                     transfers: $transfers,
                     cost: $cost,
@@ -55,7 +54,7 @@ macro_rules! on_fail_charge {
             }
         }
     };
-    ($fn:expr, $cost:expr, $execution_effect:expr, $execution_journal:expr, $transfers:expr) => {
+    ($fn:expr, $cost:expr, $execution_journal:expr, $transfers:expr) => {
         match $fn {
             Ok(res) => res,
             Err(e) => {
@@ -63,7 +62,6 @@ macro_rules! on_fail_charge {
                 warn!("Execution failed: {:?}", exec_err);
                 return ExecutionResult::Failure {
                     error: exec_err.into(),
-                    execution_effect: $execution_effect,
                     execution_journal: $execution_journal,
                     transfers: $transfers,
                     cost: $cost,
@@ -201,7 +199,6 @@ impl Executor {
             ) {
                 Ok(_value) => {
                     return ExecutionResult::Success {
-                        execution_effect: runtime.context().effect(),
                         execution_journal: runtime.context().execution_journal(),
                         transfers: runtime.context().transfers().to_owned(),
                         cost: runtime.context().gas_counter(),
@@ -210,7 +207,6 @@ impl Executor {
                 Err(error) => {
                     return ExecutionResult::Failure {
                         error: error.into(),
-                        execution_effect,
                         execution_journal: runtime.context().execution_journal(),
                         transfers: runtime.context().transfers().to_owned(),
                         cost: runtime.context().gas_counter(),
@@ -228,7 +224,6 @@ impl Executor {
             ) {
                 Ok(_value) => {
                     return ExecutionResult::Success {
-                        execution_effect: runtime.context().effect(),
                         execution_journal: runtime.context().execution_journal(),
                         transfers: runtime.context().transfers().to_owned(),
                         cost: runtime.context().gas_counter(),
@@ -237,7 +232,6 @@ impl Executor {
                 Err(error) => {
                     return ExecutionResult::Failure {
                         error: error.into(),
-                        execution_effect,
                         transfers: runtime.context().transfers().to_owned(),
                         execution_journal: runtime.context().execution_journal(),
                         cost: runtime.context().gas_counter(),
@@ -256,7 +250,6 @@ impl Executor {
                 Ok(_value) => {
                     return ExecutionResult::Success {
                         execution_journal: runtime.context().execution_journal(),
-                        execution_effect: runtime.context().effect(),
                         transfers: runtime.context().transfers().to_owned(),
                         cost: runtime.context().gas_counter(),
                     }
@@ -265,7 +258,6 @@ impl Executor {
                     return ExecutionResult::Failure {
                         execution_journal: runtime.context().execution_journal(),
                         error: error.into(),
-                        execution_effect,
                         transfers: runtime.context().transfers().to_owned(),
                         cost: runtime.context().gas_counter(),
                     }
@@ -275,14 +267,12 @@ impl Executor {
         on_fail_charge!(
             instance.invoke_export(entry_point_name, &[], &mut runtime),
             runtime.context().gas_counter(),
-            execution_effect,
             runtime.context().execution_journal(),
             runtime.context().transfers().to_owned()
         );
 
         ExecutionResult::Success {
             execution_journal: runtime.context().execution_journal(),
-            execution_effect: runtime.context().effect(),
             transfers: runtime.context().transfers().to_owned(),
             cost: runtime.context().gas_counter(),
         }
@@ -351,7 +341,6 @@ impl Executor {
                 return ExecutionResult::Failure {
                     error: error.into(),
                     execution_journal: Default::default(),
-                    execution_effect: Default::default(),
                     transfers: Vec::default(),
                     cost: Gas::default(),
                 };
@@ -363,14 +352,12 @@ impl Executor {
         match runtime.call_host_standard_payment() {
             Ok(()) => ExecutionResult::Success {
                 execution_journal: runtime.context().execution_journal(),
-                execution_effect: runtime.context().effect(),
                 transfers: runtime.context().transfers().to_owned(),
                 cost: runtime.context().gas_counter(),
             },
             Err(error) => ExecutionResult::Failure {
                 execution_journal: runtime.context().execution_journal(),
                 error: error.into(),
-                execution_effect,
                 transfers: runtime.context().transfers().to_owned(),
                 cost: runtime.context().gas_counter(),
             },
@@ -512,7 +499,6 @@ impl Executor {
             Err(error) => {
                 return ExecutionResult::Failure {
                     execution_journal,
-                    execution_effect,
                     transfers,
                     cost: gas_counter,
                     error: error.into(),
@@ -789,7 +775,6 @@ impl DirectSystemContractCall {
             Ok(value) => match value.into_t() {
                 Ok(ret) => ExecutionResult::Success {
                     execution_journal: runtime.context().execution_journal(),
-                    execution_effect: runtime.context().effect(),
                     transfers: runtime.context().transfers().to_owned(),
                     cost: runtime.context().gas_counter(),
                 }
@@ -797,7 +782,6 @@ impl DirectSystemContractCall {
                 Err(error) => ExecutionResult::Failure {
                     execution_journal: runtime.context().execution_journal(),
                     error: Error::CLValue(error).into(),
-                    execution_effect,
                     transfers: runtime.context().transfers().to_owned(),
                     cost: runtime.context().gas_counter(),
                 }
@@ -806,7 +790,6 @@ impl DirectSystemContractCall {
             Err(error) => ExecutionResult::Failure {
                 execution_journal: runtime.context().execution_journal(),
                 error: error.into(),
-                execution_effect,
                 transfers: runtime.context().transfers().to_owned(),
                 cost: runtime.context().gas_counter(),
             }
