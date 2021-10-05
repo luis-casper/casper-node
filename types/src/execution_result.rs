@@ -15,18 +15,18 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(feature = "std")]
+#[cfg(feature = "json-schema")]
 use once_cell::sync::Lazy;
 use rand::{
     distributions::{Distribution, Standard},
     seq::SliceRandom,
     Rng,
 };
-#[cfg(feature = "std")]
+#[cfg(feature = "json-schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "std")]
+#[cfg(feature = "json-schema")]
 use crate::KEY_HASH_LENGTH;
 use crate::{
     account::AccountHash,
@@ -94,7 +94,7 @@ static EXECUTION_RESULT: Lazy<ExecutionResult> = Lazy::new(|| {
 
 /// The result of executing a single deploy.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub enum ExecutionResult {
     /// The result of a failed execution.
@@ -123,6 +123,7 @@ impl ExecutionResult {
     // This method is not intended to be used by third party crates.
     #[doc(hidden)]
     #[cfg(feature = "std")]
+    #[cfg(feature = "json-schema")]
     pub fn example() -> &'static Self {
         &*EXECUTION_RESULT
     }
@@ -268,7 +269,7 @@ impl FromBytes for ExecutionResult {
 
 /// The journal of execution transforms from a single deploy.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Default, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEffect {
     /// The resulting operations.
@@ -318,7 +319,7 @@ impl FromBytes for ExecutionEffect {
 
 /// An operation performed while executing a deploy.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Operation {
     /// The formatted string of the `Key`.
@@ -351,7 +352,7 @@ impl FromBytes for Operation {
 
 /// The type of operation performed while executing a deploy.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub enum OpKind {
     /// A read operation.
@@ -394,7 +395,7 @@ impl FromBytes for OpKind {
 
 /// A transformation performed while executing a deploy.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct TransformEntry {
     /// The formatted string of the `Key`.
@@ -427,7 +428,7 @@ impl FromBytes for TransformEntry {
 
 /// The actual transformation performed while executing a deploy.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "std", derive(JsonSchema))]
+#[cfg_attr(feature = "json-schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub enum Transform {
     /// A transform having no effect.
