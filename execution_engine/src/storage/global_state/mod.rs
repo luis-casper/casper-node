@@ -129,11 +129,11 @@ pub trait StateProvider {
 /// Private data structure used to update global state efficiently.
 mod fancy_trie {
     use super::*;
-    use core::{convert::TryInto, mem};
     use crate::storage::{
         transaction_source::{Readable, Writable},
         trie::{Pointer as TriePointer, PointerBlock as TriePointerBlock},
     };
+    use core::{convert::TryInto, mem};
 
     /// Trie node variants.
     pub enum FancyTrie<K, V> {
@@ -219,22 +219,25 @@ mod fancy_trie {
 
     fn new_branches<K, V>() -> Box<[Option<Pointer<K, V>>; 256]> {
         Box::new([
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None,
         ])
     }
 
@@ -286,13 +289,7 @@ mod fancy_trie {
         /// A new root node may result, which is why this mutates a `Pointer`.
         //
         // Can't make it safe because.
-        pub fn insert<S, T, E>(
-            &mut self,
-            store: &S,
-            tx: &T,
-            key: K,
-            value: V,
-        ) -> Result<(), E>
+        pub fn insert<S, T, E>(&mut self, store: &S, tx: &T, key: K, value: V) -> Result<(), E>
         where
             K: FromBytes + ToBytes + PartialEq + std::fmt::Debug,
             V: FromBytes,
@@ -300,15 +297,15 @@ mod fancy_trie {
             T: Readable<Handle = S::Handle>,
             S::Error: From<T::Error>,
             E: From<S::Error> + From<bytesrepr::Error>,
-       {
+        {
             let mut bytes: &[u8] = &key.to_bytes()?;
             let mut current: std::ptr::NonNull<Pointer<K, V>> = self.into();
             let mut to_assign: Option<Pointer<K, V>> = None;
             loop {
-                if let Some(digest) = unsafe{current.as_ref()}.link.global_state_digest() {
-                    *unsafe{current.as_mut()} = load_from_global_state(store, tx, &digest)?;
+                if let Some(digest) = unsafe { current.as_ref() }.link.global_state_digest() {
+                    *unsafe { current.as_mut() } = load_from_global_state(store, tx, &digest)?;
                 }
-                let Pointer{is_leaf, link} = unsafe{current.as_mut()};
+                let Pointer { is_leaf, link } = unsafe { current.as_mut() };
                 if let Link::Fancy(fancy_box) = link {
                     match &mut **fancy_box {
                         FancyTrie::Leaf(k, v) => {
@@ -366,7 +363,7 @@ mod fancy_trie {
                 }
             }
             if let Some(to_assign) = to_assign {
-                *unsafe{current.as_mut()} = to_assign;
+                *unsafe { current.as_mut() } = to_assign;
             }
             Ok(())
         }
@@ -400,51 +397,50 @@ mod fancy_trie {
             let mut stack: Vec<DfsTask<K, V>> = vec![DfsTask::Open(self.into())];
             while let Some(mut task) = stack.pop() {
                 match &mut task {
-                    DfsTask::Open(current) => {
-                        match &mut unsafe{current.as_mut()}.link {
-                            Link::GlobalState(_) => (),
-                            Link::Fancy(fancy_box) => match &mut **fancy_box {
-                                FancyTrie::Leaf(_, _) => {
-                                    stack.push(DfsTask::Close(*current));
-                                }
-                                FancyTrie::Extension{affix: _, pointer} => {
-                                    stack.push(DfsTask::Close(*current));
-                                    stack.push(DfsTask::Open(pointer.into()));
-                                }
-                                FancyTrie::Node{branches} => {
-                                    stack.push(DfsTask::Close(*current));
-                                    for maybe_pointer in branches.iter_mut() {
-                                        if let Some(pointer) = maybe_pointer {
-                                            stack.push(DfsTask::Open(pointer.into()));
-                                        }
+                    DfsTask::Open(current) => match &mut unsafe { current.as_mut() }.link {
+                        Link::GlobalState(_) => (),
+                        Link::Fancy(fancy_box) => match &mut **fancy_box {
+                            FancyTrie::Leaf(_, _) => {
+                                stack.push(DfsTask::Close(*current));
+                            }
+                            FancyTrie::Extension { affix: _, pointer } => {
+                                stack.push(DfsTask::Close(*current));
+                                stack.push(DfsTask::Open(pointer.into()));
+                            }
+                            FancyTrie::Node { branches } => {
+                                stack.push(DfsTask::Close(*current));
+                                for maybe_pointer in branches.iter_mut() {
+                                    if let Some(pointer) = maybe_pointer {
+                                        stack.push(DfsTask::Open(pointer.into()));
                                     }
                                 }
                             }
-                        }
-                    }
+                        },
+                    },
                     DfsTask::Close(current) => {
-                        let current = unsafe{current.as_mut()};
+                        let current = unsafe { current.as_mut() };
                         match mem::take(&mut current.link) {
                             Link::GlobalState(_) => unreachable!(),
                             Link::Fancy(fancy_box) => match *fancy_box {
                                 FancyTrie::Leaf(key, value) => {
-                                    let trie = Trie::Leaf{key, value};
+                                    let trie = Trie::Leaf { key, value };
                                     let trie_hash = Digest::hash(trie.to_bytes()?);
                                     store.put(tx, &trie_hash, &trie)?;
                                     current.link = Link::GlobalState(trie_hash);
                                 }
-                                FancyTrie::Extension{affix, pointer} => {
-                                    match pointer.link {
-                                        Link::Fancy(_) => unreachable!(),
-                                        Link::GlobalState(digest) => {
-                                            let trie = Trie::Extension{affix: (&affix[..]).into(), pointer: trie_pointer_from(&digest, current.is_leaf)};
-                                            let trie_hash = Digest::hash(trie.to_bytes()?);
-                                            store.put(tx, &trie_hash, &trie)?;
-                                            current.link = Link::GlobalState(trie_hash);
-                                        }
+                                FancyTrie::Extension { affix, pointer } => match pointer.link {
+                                    Link::Fancy(_) => unreachable!(),
+                                    Link::GlobalState(digest) => {
+                                        let trie = Trie::Extension {
+                                            affix: (&affix[..]).into(),
+                                            pointer: trie_pointer_from(&digest, current.is_leaf),
+                                        };
+                                        let trie_hash = Digest::hash(trie.to_bytes()?);
+                                        store.put(tx, &trie_hash, &trie)?;
+                                        current.link = Link::GlobalState(trie_hash);
                                     }
-                                }
-                                FancyTrie::Node{branches} => {
+                                },
+                                FancyTrie::Node { branches } => {
                                     let trie = Trie::Node{pointer_block: Box::new(TriePointerBlock::from_indexed_pointers(
                                         &branches.iter().enumerate().filter_map(|(i, maybe_pointer)| {
                                             maybe_pointer.as_ref().map(|pointer| {
@@ -459,7 +455,7 @@ mod fancy_trie {
                                     store.put(tx, &trie_hash, &trie)?;
                                     current.link = Link::GlobalState(trie_hash);
                                 }
-                            }
+                            },
                         }
                     }
                 }
