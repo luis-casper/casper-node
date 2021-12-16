@@ -426,8 +426,8 @@ mod fancy_trie {
         /// In essence, update global state with the entries added to the fancy trie.
         pub fn update_global_state<S, T, E>(&mut self, store: &S, tx: &mut T) -> Result<(), E>
         where
-            K: ToBytes + Clone,
-            V: ToBytes + Clone,
+            K: ToBytes,
+            V: ToBytes,
             S: TrieStore<K, V>,
             T: Writable<Handle = S::Handle>,
             S::Error: From<T::Error>,
