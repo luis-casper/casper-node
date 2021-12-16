@@ -311,11 +311,11 @@ mod fancy_trie {
                 let Pointer{is_leaf, link} = unsafe{current.as_mut()};
                 if let Link::Fancy(fancy_box) = link {
                     match &mut **fancy_box {
-                        FancyTrie::Leaf(k, _) => {
+                        FancyTrie::Leaf(k, v) => {
                             debug_assert!(*is_leaf);
                             debug_assert!(bytes.is_empty(), "Tries must be prefix-free.");
                             debug_assert_eq!(*k, key);
-                            *k = key;
+                            *v = value;
                             break;
                         }
                         FancyTrie::Node { branches } => {
