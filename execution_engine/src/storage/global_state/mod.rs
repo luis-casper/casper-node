@@ -535,7 +535,7 @@ where
     S::Error: From<R::Error>,
     E: From<R::Error> + From<S::Error> + From<bytesrepr::Error> + From<CommitError>,
 {
-    let mut txn = environment.create_read_write_txn()?;
+    let txn = environment.create_read_txn()?;
     let state_root = prestate_hash;
     let mut fancy_trie = fancy_trie::Pointer {
         link: fancy_trie::Link::GlobalState(state_root),
@@ -550,6 +550,7 @@ where
     for (key, value) in stored_values.iter() {
         fancy_trie.insert::<_, _, E>(store, &txn, *key, value.clone())?;
     }
+    let mut txn = environment.create_read_write_txn()?;
     fancy_trie.update_global_state::<_, _, E>(store, &mut txn)?;
     txn.commit()?;
     Ok(state_root)
