@@ -137,11 +137,14 @@ mod fancy_trie {
 
     /// Trie node variants.
     pub enum FancyTrie<K, V> {
+        /// A leaf holding a key-value pair.
         Leaf(K, V),
+        /// An extension expressing all children have a common prefix.
         Extension {
             affix: Vec<u8>,
             pointer: Pointer<K, V>,
         },
+        /// An internal node with branching based on the first byte.
         Node {
             branches: Box<[Option<Pointer<K, V>>; 256]>,
         },
@@ -156,6 +159,7 @@ mod fancy_trie {
     }
 
     impl<K, V> Link<K, V> {
+        /// Gets the global state digest under the link, if there is one.
         fn global_state_digest(&self) -> Option<Digest> {
             match self {
                 Link::GlobalState(digest) => Some(digest.clone()),
@@ -172,7 +176,10 @@ mod fancy_trie {
 
     /// Links to a node while being loosely compatible with `TriePointer`.
     pub struct Pointer<K, V> {
+        /// Links to a fancy trie node, either in memory or from global state.
         pub link: Link<K, V>,
+        /// Whether the target node is a leaf or not. We need to know this without having to load
+        /// the target from global state.
         pub is_leaf: bool,
     }
 
@@ -217,6 +224,7 @@ mod fancy_trie {
         }
     }
 
+    // NOTE: Can we find a better way to write this?
     fn new_branches<K, V>() -> Box<[Option<Pointer<K, V>>; 256]> {
         Box::new([
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -257,6 +265,7 @@ mod fancy_trie {
         Ok(
             match store
                 .get(tx, digest)?
+                // NOTE: Should we map to an error here?
                 .expect("Hashes referred to must be in global state.")
             {
                 Trie::Leaf { key, value } => Pointer::new_leaf(key, value),
@@ -288,7 +297,12 @@ mod fancy_trie {
         /// Inserts a key-value pair into a fancy trie.
         /// A new root node may result, which is why this mutates a `Pointer`.
         //
-        // Can't make it safe because.
+        // NOTE: Couldn't make it safe because of how Rust handles lifetime constraints.
+        // We attempted `let mut current: &mut Pointer<K, V> = self`, but then we couldn't assign to
+        // `*current` because `link` and `fancy_box` are borrowed. The assignment to `current` in the
+        // loop imply that the lifetimes of `link` and `fancy_box` have to include that of `current`.
+        // We can't make this recursive either because Rust doesn't guarantee tail call elimination.
+        // This is really regrettable and a safe, non-recursive, version is very welcome.
         pub fn insert<S, T, E>(&mut self, store: &S, tx: &T, key: K, value: V) -> Result<(), E>
         where
             K: FromBytes + ToBytes + PartialEq + std::fmt::Debug,
@@ -298,10 +312,15 @@ mod fancy_trie {
             S::Error: From<T::Error>,
             E: From<S::Error> + From<bytesrepr::Error>,
         {
+            /// The suffix of the key bytes at the node we are considering.
             let mut bytes: &[u8] = &key.to_bytes()?;
+            /// The node we are considering. It's actually a reference to a pointer to that node
+            /// because we might have to replace it.
             let mut current: std::ptr::NonNull<Pointer<K, V>> = self.into();
+            /// At the end we replace the current node pointer with this pointer, if it exists.
             let mut to_assign: Option<Pointer<K, V>> = None;
             loop {
+                // If the current node is in global state, fetch it.
                 if let Some(digest) = unsafe { current.as_ref() }.link.global_state_digest() {
                     *unsafe { current.as_mut() } = load_from_global_state(store, tx, &digest)?;
                 }
@@ -309,6 +328,9 @@ mod fancy_trie {
                 if let Link::Fancy(fancy_box) = link {
                     match &mut **fancy_box {
                         FancyTrie::Leaf(k, v) => {
+                            // This code is unreachable because we don't insert a key twice in
+                            // the fancy trie, bue we keep this implemented in case the fancy trie
+                            // is put to another use later.
                             debug_assert!(*is_leaf);
                             debug_assert!(bytes.is_empty(), "Tries must be prefix-free.");
                             debug_assert_eq!(*k, key);
@@ -321,6 +343,7 @@ mod fancy_trie {
                             let branch = &mut branches[bytes[0] as usize];
                             match branch {
                                 Some(pointer) => {
+                                    // Move down the branch.
                                     current = pointer.into();
                                     bytes = &bytes[1..];
                                 }
@@ -334,21 +357,31 @@ mod fancy_trie {
                             debug_assert!(!*is_leaf);
                             let lcp = longest_common_prefix_size(bytes, &affix[..]);
                             if lcp == affix.len() {
+                                // If we are prefix-compatible with the extension, move through it.
                                 current = pointer.into();
                                 bytes = &bytes[lcp..];
                             } else {
+                                // Make some surgery to insert an internal node with two branches.
                                 debug_assert!(lcp < bytes.len(), "Tries must be prefix-free.");
                                 let mut branches = new_branches();
                                 branches[bytes[lcp] as usize] = Some(Pointer::new_leaf(key, value));
+                                // We need to remove the pointer from the current node to put it in
+                                // another node.
                                 branches[affix[lcp] as usize] = Some(if affix.len() - lcp >= 2 {
                                     Pointer::new_extension(&affix[lcp + 1..], mem::take(pointer))
                                 } else {
+                                    // No need to have an extension of length `0`.
                                     mem::take(pointer)
                                 });
+                                // The two-branch internal node.
                                 let node = Pointer {
                                     link: Link::Fancy(Box::new(FancyTrie::Node { branches })),
                                     is_leaf: false,
                                 };
+                                // We replace the current node with either the two-branch internal
+                                // node or an extension depending on wether its size would be 0.
+                                // Recall the current node is not valid at this point because we
+                                // extracted its pointer.
                                 to_assign = Some(if lcp == 0 {
                                     node
                                 } else {
@@ -369,11 +402,17 @@ mod fancy_trie {
         }
     }
 
+    /// A Depth-First-Search stack element for writing the trie to global state.
     enum DfsTask<K, V> {
+        /// The node is being first considered.
         Open(std::ptr::NonNull<Pointer<K, V>>),
+        /// All the sub-nodes were properly processed and are now global state references,
+        /// so this node is ready to be written to global state and replaced by a global
+        /// state reference.
         Close(std::ptr::NonNull<Pointer<K, V>>),
     }
 
+    /// Makes a trie pointer from the contents of a global state fancy trie pointer.
     fn trie_pointer_from(digest: &Digest, is_leaf: bool) -> TriePointer {
         if is_leaf {
             TriePointer::LeafPointer(digest.clone())
@@ -394,19 +433,29 @@ mod fancy_trie {
             S::Error: From<T::Error>,
             E: From<bytesrepr::Error> + From<S::Error>,
         {
+            /// The DFS stack.
             let mut stack: Vec<DfsTask<K, V>> = vec![DfsTask::Open(self.into())];
             while let Some(mut task) = stack.pop() {
                 match &mut task {
                     DfsTask::Open(current) => match &mut unsafe { current.as_mut() }.link {
+                        // Global state references don't need to be opened.
                         Link::GlobalState(_) => (),
                         Link::Fancy(fancy_box) => match &mut **fancy_box {
+                            // Leaves are immediately ready to be closed.
+                            //
+                            // NOTE: Were we coding in C, there wouldn't be any need to push this
+                            // into the stack, we could just close it here, but we need to appease
+                            // the Rust borrow checker. A way to close the node here is welcome.
                             FancyTrie::Leaf(_, _) => {
                                 stack.push(DfsTask::Close(*current));
                             }
+                            // We need to handle the extension's pointer before we can close it.
                             FancyTrie::Extension { affix: _, pointer } => {
                                 stack.push(DfsTask::Close(*current));
                                 stack.push(DfsTask::Open(pointer.into()));
                             }
+                            // We need to handle all the branches before we can close an internal
+                            // node.
                             FancyTrie::Node { branches } => {
                                 stack.push(DfsTask::Close(*current));
                                 for maybe_pointer in branches.iter_mut() {
@@ -418,8 +467,11 @@ mod fancy_trie {
                         },
                     },
                     DfsTask::Close(current) => {
+                        // Take a mutable reference to the pointer. Its link will be updated with
+                        // a link to global state.
                         let current = unsafe { current.as_mut() };
                         match mem::take(&mut current.link) {
+                            // We never ask to open, let alone close, a global state reference.
                             Link::GlobalState(_) => unreachable!(),
                             Link::Fancy(fancy_box) => match *fancy_box {
                                 FancyTrie::Leaf(key, value) => {
@@ -429,6 +481,7 @@ mod fancy_trie {
                                     current.link = Link::GlobalState(trie_hash);
                                 }
                                 FancyTrie::Extension { affix, pointer } => match pointer.link {
+                                    // The link must have become a global state reference.
                                     Link::Fancy(_) => unreachable!(),
                                     Link::GlobalState(digest) => {
                                         let trie = Trie::Extension {
@@ -445,8 +498,11 @@ mod fancy_trie {
                                         &branches.iter().enumerate().filter_map(|(i, maybe_pointer)| {
                                             maybe_pointer.as_ref().map(|pointer| {
                                                 match pointer.link {
+                                                    // The link must have become a global state reference.
                                                     Link::Fancy(_) => unreachable!(),
-                                                    Link::GlobalState(digest) => (i.try_into().expect("Branch indices must fit into an `u8`."), trie_pointer_from(&digest, current.is_leaf)),
+                                                    Link::GlobalState(digest) => (
+                                                        i.try_into().expect("Branch indices must fit into an `u8`."),
+                                                        trie_pointer_from(&digest, current.is_leaf)),
                                                 }
                                             })
                                         }).collect::<Vec<_>>()[..]
@@ -483,7 +539,12 @@ where
     let state_root = prestate_hash;
     let mut fancy_trie = fancy_trie::Pointer {
         link: fancy_trie::Link::GlobalState(state_root),
-        // This doesn't matter because...
+        // This value doesn't matter because:
+        // * If nothing is inserted into the fancy trie, then nothing will be written to global
+        //   state and this value won't be used.
+        // * If something is put into the fancy trie, it will trigger a global state read without
+        //   consulting this value and it will then be replaced based on the data read from
+        //   global state.
         is_leaf: false,
     };
     for (key, value) in stored_values.iter() {
