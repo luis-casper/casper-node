@@ -312,12 +312,12 @@ mod fancy_trie {
             S::Error: From<T::Error>,
             E: From<S::Error> + From<bytesrepr::Error>,
         {
-            /// The suffix of the key bytes at the node we are considering.
+            // The suffix of the key bytes at the node we are considering.
             let mut bytes: &[u8] = &key.to_bytes()?;
-            /// The node we are considering. It's actually a reference to a pointer to that node
-            /// because we might have to replace it.
+            // The node we are considering. It's actually a reference to a pointer to that node
+            // because we might have to replace it.
             let mut current: std::ptr::NonNull<Pointer<K, V>> = self.into();
-            /// At the end we replace the current node pointer with this pointer, if it exists.
+            // At the end we replace the current node pointer with this pointer, if it exists.
             let mut to_assign: Option<Pointer<K, V>> = None;
             loop {
                 // If the current node is in global state, fetch it.
@@ -433,7 +433,7 @@ mod fancy_trie {
             S::Error: From<T::Error>,
             E: From<bytesrepr::Error> + From<S::Error>,
         {
-            /// The DFS stack.
+            // The DFS stack.
             let mut stack: Vec<DfsTask<K, V>> = vec![DfsTask::Open(self.into())];
             while let Some(mut task) = stack.pop() {
                 match &mut task {
@@ -525,7 +525,7 @@ mod fancy_trie {
 pub fn put_stored_values<'a, R, S, E>(
     environment: &'a R,
     store: &S,
-    correlation_id: CorrelationId,
+    _correlation_id: CorrelationId,
     prestate_hash: Digest,
     stored_values: HashMap<Key, StoredValue>,
 ) -> Result<Digest, E>
