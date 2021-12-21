@@ -192,8 +192,8 @@ mod fancy_trie {
         }
     }
 
-    /// Finds the size of the longest common prefix of two byte strings.
-    fn longest_common_prefix_size(a: &[u8], b: &[u8]) -> usize {
+    /// Finds the length of the longest common prefix of two byte slices.
+    fn longest_common_prefix_len(a: &[u8], b: &[u8]) -> usize {
         let n = core::cmp::min(a.len(), b.len());
         for i in 0..n {
             if a[i] != b[i] {
@@ -329,7 +329,7 @@ mod fancy_trie {
                     match &mut **fancy_box {
                         FancyTrie::Leaf(k, v) => {
                             // This code is unreachable because we don't insert a key twice in
-                            // the fancy trie, bue we keep this implemented in case the fancy trie
+                            // the fancy trie, but we keep this implemented in case the fancy trie
                             // is put to another use later.
                             debug_assert!(*is_leaf);
                             debug_assert!(bytes.is_empty(), "Tries must be prefix-free.");
@@ -348,14 +348,19 @@ mod fancy_trie {
                                     bytes = &bytes[1..];
                                 }
                                 None => {
-                                    *branch = Some(Pointer::new_leaf(key, value));
+                                    let leaf = Pointer::new_leaf(key, value);
+                                    *branch = Some(if bytes.len() == 1 {
+                                        leaf
+                                    } else {
+                                        Pointer::new_extension(&bytes[1..], leaf)
+                                    });
                                     break;
                                 }
                             }
                         }
                         FancyTrie::Extension { affix, pointer } => {
                             debug_assert!(!*is_leaf);
-                            let lcp = longest_common_prefix_size(bytes, &affix[..]);
+                            let lcp = longest_common_prefix_len(bytes, &affix[..]);
                             if lcp == affix.len() {
                                 // If we are prefix-compatible with the extension, move through it.
                                 current = pointer.into();
@@ -364,11 +369,16 @@ mod fancy_trie {
                                 // Make some surgery to insert an internal node with two branches.
                                 debug_assert!(lcp < bytes.len(), "Tries must be prefix-free.");
                                 let mut branches = new_branches();
-                                branches[bytes[lcp] as usize] = Some(Pointer::new_leaf(key, value));
+                                let leaf = Pointer::new_leaf(key, value);
+                                branches[bytes[lcp] as usize] = Some(if lcp + 1 == bytes.len() {
+                                    leaf
+                                } else {
+                                    Pointer::new_extension(&bytes[lcp+1..], leaf)
+                                });
                                 // We need to remove the pointer from the current node to put it in
                                 // another node.
                                 branches[affix[lcp] as usize] = Some(if affix.len() - lcp >= 2 {
-                                    Pointer::new_extension(&affix[lcp + 1..], mem::take(pointer))
+                                    Pointer::new_extension(&affix[lcp+1..], mem::take(pointer))
                                 } else {
                                     // No need to have an extension of length `0`.
                                     mem::take(pointer)
@@ -444,7 +454,7 @@ mod fancy_trie {
                             // Leaves are immediately ready to be closed.
                             //
                             // NOTE: Were we coding in C, there wouldn't be any need to push this
-                            // into the stack, we could just close it here, but we need to appease
+                            // onto the stack, we could just close it here, but we need to appease
                             // the Rust borrow checker. A way to close the node here is welcome.
                             FancyTrie::Leaf(_, _) => {
                                 stack.push(DfsTask::Close(*current));
@@ -480,10 +490,10 @@ mod fancy_trie {
                                     Link::Fancy(_) => unreachable!(),
                                     Link::GlobalState(digest) => Trie::Extension {
                                         affix: (&affix[..]).into(),
-                                        pointer: trie_pointer_from(&digest, current.is_leaf),
+                                        pointer: trie_pointer_from(&digest, pointer.is_leaf),
                                     }
                                 },
-                                FancyTrie::Node { branches } => Trie::Node{
+                                FancyTrie::Node { branches } => Trie::Node {
                                     pointer_block: Box::new(TriePointerBlock::from_indexed_pointers(
                                         &branches.iter().enumerate().filter_map(|(i, maybe_pointer)| {
                                             maybe_pointer.as_ref().map(|pointer| {
@@ -492,7 +502,7 @@ mod fancy_trie {
                                                     Link::Fancy(_) => unreachable!(),
                                                     Link::GlobalState(digest) => (
                                                         i.try_into().expect("Branch indices must fit into an `u8`."),
-                                                        trie_pointer_from(&digest, current.is_leaf)),
+                                                        trie_pointer_from(&digest, pointer.is_leaf)),
                                                 }
                                             })
                                         }).collect::<Vec<_>>()[..]
@@ -537,8 +547,8 @@ where
         //   global state.
         is_leaf: false,
     };
-    for (key, value) in stored_values.iter() {
-        fancy_trie.insert::<_, _, E>(store, &txn, *key, value.clone())?;
+    for (key, value) in stored_values {
+        fancy_trie.insert::<_, _, E>(store, &txn, key, value)?;
     }
     let mut txn = environment.create_read_write_txn()?;
     fancy_trie.update_global_state::<_, _, E>(store, &mut txn)?;
