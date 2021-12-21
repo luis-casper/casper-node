@@ -470,31 +470,21 @@ mod fancy_trie {
                         // Take a mutable reference to the pointer. Its link will be updated with
                         // a link to global state.
                         let current = unsafe { current.as_mut() };
-                        match mem::take(&mut current.link) {
+                        let trie = match mem::take(&mut current.link) {
                             // We never ask to open, let alone close, a global state reference.
                             Link::GlobalState(_) => unreachable!(),
                             Link::Fancy(fancy_box) => match *fancy_box {
-                                FancyTrie::Leaf(key, value) => {
-                                    let trie = Trie::Leaf { key, value };
-                                    let trie_hash = Digest::hash(trie.to_bytes()?);
-                                    store.put(tx, &trie_hash, &trie)?;
-                                    current.link = Link::GlobalState(trie_hash);
-                                }
+                                FancyTrie::Leaf(key, value) => Trie::Leaf { key, value },
                                 FancyTrie::Extension { affix, pointer } => match pointer.link {
                                     // The link must have become a global state reference.
                                     Link::Fancy(_) => unreachable!(),
-                                    Link::GlobalState(digest) => {
-                                        let trie = Trie::Extension {
-                                            affix: (&affix[..]).into(),
-                                            pointer: trie_pointer_from(&digest, current.is_leaf),
-                                        };
-                                        let trie_hash = Digest::hash(trie.to_bytes()?);
-                                        store.put(tx, &trie_hash, &trie)?;
-                                        current.link = Link::GlobalState(trie_hash);
+                                    Link::GlobalState(digest) => Trie::Extension {
+                                        affix: (&affix[..]).into(),
+                                        pointer: trie_pointer_from(&digest, current.is_leaf),
                                     }
                                 },
-                                FancyTrie::Node { branches } => {
-                                    let trie = Trie::Node{pointer_block: Box::new(TriePointerBlock::from_indexed_pointers(
+                                FancyTrie::Node { branches } => Trie::Node{
+                                    pointer_block: Box::new(TriePointerBlock::from_indexed_pointers(
                                         &branches.iter().enumerate().filter_map(|(i, maybe_pointer)| {
                                             maybe_pointer.as_ref().map(|pointer| {
                                                 match pointer.link {
@@ -506,13 +496,13 @@ mod fancy_trie {
                                                 }
                                             })
                                         }).collect::<Vec<_>>()[..]
-                                    ))};
-                                    let trie_hash = Digest::hash(trie.to_bytes()?);
-                                    store.put(tx, &trie_hash, &trie)?;
-                                    current.link = Link::GlobalState(trie_hash);
-                                }
+                                    ))
+                                },
                             },
-                        }
+                        };
+                        let trie_hash = Digest::hash(trie.to_bytes()?);
+                        store.put(tx, &trie_hash, &trie)?;
+                        current.link = Link::GlobalState(trie_hash);
                     }
                 }
             }
